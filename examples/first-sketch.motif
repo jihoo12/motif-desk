@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "bpm": 120,
+  "backingGain": 0.7,
+  "backing": "",
+  "notes": [
+    {"pitch": 64, "beat": 0, "length": 0.75, "velocity": 0.78},
+    {"pitch": 67, "beat": 1, "length": 0.5, "velocity": 0.87},
+    {"pitch": 69, "beat": 1.75, "length": 0.75, "velocity": 0.8},
+    {"pitch": 67, "beat": 2.75, "length": 1.5, "velocity": 0.75},
+    {"pitch": 62, "beat": 4, "length": 0.75, "velocity": 0.75},
+    {"pitch": 64, "beat": 5, "length": 0.5, "velocity": 0.8},
+    {"pitch": 67, "beat": 5.75, "length": 1.5, "velocity": 0.84},
+    {"pitch": 64, "beat": 8, "length": 0.75, "velocity": 0.76},
+    {"pitch": 67, "beat": 9, "length": 0.5, "velocity": 0.87},
+    {"pitch": 72, "beat": 9.75, "length": 0.75, "velocity": 0.85},
+    {"pitch": 71, "beat": 10.75, "length": 1, "velocity": 0.76},
+    {"pitch": 67, "beat": 12, "length": 0.5, "velocity": 0.76},
+    {"pitch": 64, "beat": 12.75, "length": 0.5, "velocity": 0.73},
+    {"pitch": 62, "beat": 13.5, "length": 0.5, "velocity": 0.72},
+    {"pitch": 60, "beat": 14.25, "length": 1.5, "velocity": 0.82}
+  ]
+}
