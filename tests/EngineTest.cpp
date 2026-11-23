@@ -70,6 +70,22 @@ void run() {
     engine.setPlaying(true);
     b.tick(engine);
     check(b.peak()>.04f,"Decoded/resampled backing didn't sound");
+    juce::AudioBuffer<float> full, cut;
+    p.bpm=127;
+    p.notes={{64,3.75,.75,.85f},{67,6,1,.9f}};
+    check(motif::Engine::renderOffline(p,{},.7f,1,4,full).wasOk(),"Offline render failed");
+    check(motif::Engine::renderOffline(p,{},.7f,2,3,cut).wasOk(),"Sliced offline render failed");
+    const auto offset=static_cast<int>(std::llround(4*48000*60/127.0));
+    const auto expected=static_cast<int>(std::llround(12*48000*60/127.0))-offset;
+    check(cut.getNumChannels()==2 && cut.getNumSamples()==expected,"Wrong sliced duration");
+    check(cut.getMagnitude(0,0,320)>.001f,"Previous bar's ringing note was lost");
+    for(int ch=0;ch<2;++ch) {
+        check(std::equal(cut.getReadPointer(ch),cut.getReadPointer(ch)+expected,full.getReadPointer(ch)+offset),
+              "Sliced render does not match full render");
+    }
+    check(motif::Engine::renderOffline(p,{},.7f,4,2,cut).failed(),"Invalid offline range was accepted");
+    check(cut.getNumSamples()==expected,"Failed render replaced output");
+
     engine.clearBacking();
     b.tick(engine);
     check(b.peak()==0,"Cleared backing continued to sound");

@@ -47,6 +47,11 @@ public:
     std::vector<float> waveform() const;
     double backingDurationSeconds() const;
 
+    // Renders an inclusive, one-based four-bar subsection at 48 kHz stereo.
+    // An empty File omits the backing. Leave output untouched on failure.
+    static juce::Result renderOffline (const Project&, const juce::File& backing, float backingGain,
+                                       int firstBar, int lastBar, juce::AudioBuffer<float>& output);
+
     void audioDeviceAboutToStart (juce::AudioIODevice*) override;
     void audioDeviceStopped() override;
     void audioDeviceIOCallbackWithContext (const float* const*, int, float* const*, int, int,

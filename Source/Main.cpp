@@ -1,5 +1,5 @@
 #include <JuceHeader.h>
-#include "Engine.h"
+#include "ProjectIO.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -16,16 +16,6 @@ const auto bg = juce::Colour(0xff16141d), panel = juce::Colour(0xff211e2a),
 constexpr double totalBeats = 16.0, step = 0.25;
 constexpr int pianoWidth = 50, rulerHeight = 24, rows = 25;
 double snap(double beat) { return std::round(beat / step) * step; }
-bool collides(const Project& p, const Note& key, std::optional<size_t> except = {}) {
-    for (size_t i = 0; i < p.notes.size(); ++i) {
-        const auto& n = p.notes[i];
-        if (except && *except == i) continue;
-        if (n.pitch == key.pitch && n.beat < key.beat + key.length - 1e-8
-                && key.beat < n.beat + n.length - 1e-8)
-            return true;
-    }
-    return false;
-}
 Project starter() {
     Project p;
     p.notes = {
@@ -378,48 +368,23 @@ private:
         pick("Save your sketch","*.motif",juce::FileBrowserComponent::saveMode|juce::FileBrowserComponent::canSelectFiles|juce::FileBrowserComponent::warnAboutOverwriting,
              [this](const auto& file){
             auto f=file.hasFileExtension("motif")?file:file.withFileExtension("motif");
-            juce::DynamicObject::Ptr doc=new juce::DynamicObject();
-            doc->setProperty("version",1); doc->setProperty("bpm",project.bpm);
-            doc->setProperty("backingGain",gain.getValue());
-            doc->setProperty("backing",backing==juce::File{}?juce::String{}:backing.getRelativePathFrom(f.getParentDirectory()));
-            juce::Array<juce::var> notes;
-            for(const auto& n:project.notes){
-                juce::DynamicObject::Ptr o=new juce::DynamicObject();
-                o->setProperty("pitch",n.pitch); o->setProperty("beat",n.beat); o->setProperty("length",n.length);
-                o->setProperty("velocity",static_cast<double>(n.velocity)); notes.add(juce::var(o.get()));
-            }
-            doc->setProperty("notes",juce::var(notes));
-            notice(f.replaceWithText(juce::JSON::toString(juce::var(doc.get())))?"Saved "+f.getFileName():"Could not write the sketch.");
+            const auto result=writeSketch(f,{project,backing,static_cast<float>(gain.getValue())});
+            notice(result.wasOk()?"Saved "+f.getFileName():result.getErrorMessage());
         });
     }
     void chooseOpen() {
         pick("Open a sketch","*.motif",juce::FileBrowserComponent::openMode|juce::FileBrowserComponent::canSelectFiles,
              [this](const auto& f){
-            if (f.getSize()>1024*1024) {notice("Sketch file is too large.");return;}
-            const auto doc=juce::JSON::parse(f);
-            auto noteArray=doc.getProperty("notes",{}); auto* a=noteArray.getArray();
-            auto tempo=static_cast<double>(doc.getProperty("bpm",0));
-            if(!doc.isObject() || int(doc.getProperty("version",0))!=1 || !a || a->size()>4096
-                    || !std::isfinite(tempo) || tempo<45 || tempo>240) {notice("Not a Motif Desk sketch.");return;}
-            Project next; next.bpm=tempo;
-            for(const auto& v:*a){
-                Note n{int(v.getProperty("pitch",-1)),double(v.getProperty("beat",-1)),double(v.getProperty("length",0)),
-                       float(v.getProperty("velocity",0))};
-                if(!v.isObject() || n.pitch<0 || n.pitch>127 || !std::isfinite(n.beat) || !std::isfinite(n.length) ||
-                   !std::isfinite(n.velocity) || n.beat<0 || n.length<step || n.beat+n.length>totalBeats + 1e-8 ||
-                   n.velocity<=0 || n.velocity>1 || collides(next,n)) { notice("Sketch contains an invalid note."); return; }
-                next.notes.push_back(n);
-            }
+            Sketch next;
+            const auto result=readSketch(f,next);
+            if(result.failed()) { notice(result.getErrorMessage()); return; }
             engine.setPlaying(false); engine.seek(0); engine.clearBacking();
             backing=juce::File{}; peaks.clear(); backingSeconds=0;
-            project=std::move(next); undoState.clear(); roll.resetSelection();
+            project=std::move(next.project); undoState.clear(); roll.resetSelection();
             bpm.setValue(project.bpm,juce::dontSendNotification);
-            auto volume=double(doc.getProperty("backingGain",.7));
-            if(!std::isfinite(volume))volume=.7;
-            gain.setValue(juce::jlimit(0.,1.,volume),juce::dontSendNotification);
-            engine.setBackingGain(static_cast<float>(gain.getValue())); sync();
-            auto path=doc.getProperty("backing",{}).toString();
-            if (path.isNotEmpty() && !setBackingFile(f.getParentDirectory().getChildFile(path)))
+            gain.setValue(next.backingGain,juce::dontSendNotification);
+            engine.setBackingGain(next.backingGain); sync();
+            if (next.backing != juce::File{} && !setBackingFile(next.backing))
                 notice("Opened sketch but its backing WAV could not be found or read.");
             else notice("Opened " + f.getFileName());
         });
@@ -428,19 +393,8 @@ private:
         pick("Export the piano roll","*.mid",juce::FileBrowserComponent::saveMode|juce::FileBrowserComponent::canSelectFiles|juce::FileBrowserComponent::warnAboutOverwriting,
             [this](const auto& file){
             auto f=file.hasFileExtension("mid")?file:file.withFileExtension("mid");
-            juce::MidiMessageSequence seq;
-            auto tempo=juce::MidiMessage::tempoMetaEvent(static_cast<int>(std::lround(60000000/project.bpm)));
-            seq.addEvent(tempo);
-            for (const auto& n: project.notes) {
-                seq.addEvent(juce::MidiMessage::noteOff(1,n.pitch).withTimeStamp((n.beat+n.length)*480.0));
-            }
-            for (const auto& n: project.notes) {
-                seq.addEvent(juce::MidiMessage::noteOn(1,n.pitch,n.velocity).withTimeStamp(n.beat*480.0));
-            }
-            juce::MidiFile mf; mf.setTicksPerQuarterNote(480); mf.addTrack(seq);
-            juce::MemoryOutputStream encoded;
-            const bool ok=mf.writeTo(encoded,0)&&f.replaceWithData(encoded.getData(),encoded.getDataSize());
-            notice(ok?"Exported " + f.getFileName():"Could not export the MIDI file.");
+            const auto result=writeMidi(f,project);
+            notice(result.wasOk()?"Exported "+f.getFileName():result.getErrorMessage());
         });
     }
 };

@@ -188,6 +188,54 @@ void Engine::audition (int midiPitch)
     publish();
 }
 
+juce::Result Engine::renderOffline (const Project& project, const juce::File& backing,
+                                    float backingGain, int firstBar, int lastBar,
+                                    juce::AudioBuffer<float>& output)
+{
+    if (firstBar < 1 || lastBar > 4 || firstBar > lastBar)
+        return juce::Result::fail ("Choose a bar range from 1 through 4.");
+
+    constexpr int sampleRate = 48000;
+    constexpr int blockFrames = 512;
+    Engine engine;
+    engine.rate = sampleRate;
+    engine.setProject (project);
+    engine.setBackingGain (backingGain);
+    if (backing.getFullPathName().isNotEmpty())
+    {
+        auto loaded = engine.loadBacking (backing);
+        if (loaded.failed())
+            return loaded;
+    }
+
+    const auto framesAtBarBoundary = [&] (int bars)
+    {
+        return static_cast<int> (std::llround (bars * 4.0 * sampleRate * 60.0 / engine.editing.project.bpm));
+    };
+    const int start = framesAtBarBoundary (firstBar - 1);
+    const int end = framesAtBarBoundary (lastBar);
+    juce::AudioBuffer<float> selected (2, end - start);
+    std::array<float, blockFrames> scratchL {}, scratchR {};
+    float* scratch[] { scratchL.data(), scratchR.data() };
+    engine.setPlaying (true);
+
+    // Run the same callback and voices from the true beat zero. Discard the
+    // preceding audio, not the preceding note events or sample history.
+    for (int frame = 0; frame < end;)
+    {
+        const int count = std::min (blockFrames, end - frame);
+        engine.audioDeviceIOCallbackWithContext (nullptr, 0, scratch, 2, count, {});
+        const int copyStart = std::max (frame, start);
+        if (copyStart < frame + count)
+            for (int channel = 0; channel < 2; ++channel)
+                selected.copyFrom (channel, copyStart - start, scratch[channel] + copyStart - frame, frame + count - copyStart);
+        frame += count;
+    }
+
+    output = std::move (selected);
+    return juce::Result::ok();
+}
+
 void Engine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
     const double newRate = device != nullptr ? device->getCurrentSampleRate() : 0.0;
